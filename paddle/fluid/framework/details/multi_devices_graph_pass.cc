@@ -231,63 +231,11 @@ size_t MultiDevSSAGraphBuilder::GetAppropriateDeviceID(
   return dev_id;
 }
 
-// Topology sort the graph nodes from inputs to outputs.
-// Since SSAGraphBuilder depends on forward/backward nodes to assign devices
-// to parameter/gradients before optimizer ops, topo sort is insufficient. (
-// some optimizer ops might not depend on any nodes), we manually move all
-// optimizer nodes after last backward nodes.
-// However, the assumption by SSAGraphBuilder should be relaxed in the future.
-std::vector<ir::Node *> SortOpsAndDelayOptimizeOp(const ir::Graph &graph) {
-  std::vector<ir::Node *> ret = ir::TopologySortOperations(graph);
-  size_t last_backward = 0;
-  for (size_t i = 0; i < ret.size(); ++i) {
-    if (boost::get<int>(
-            ret[i]->Op()->GetAttr(OpProtoAndCheckerMaker::OpRoleAttrName())) ==
-        static_cast<int>(OpRole::kBackward)) {
-      last_backward = i;
-    }
-  }
-
-  std::vector<ir::Node *> optimize_ops;
-  std::vector<ir::Node *> sorted_ret;
-  for (size_t i = 0; i < ret.size(); ++i) {
-    if (i < last_backward) {
-      if (boost::get<int>(ret[i]->Op()->GetAttr(
-              OpProtoAndCheckerMaker::OpRoleAttrName())) ==
-          static_cast<int>(OpRole::kOptimize)) {
-        optimize_ops.push_back(ret[i]);
-      } else {
-        sorted_ret.push_back(ret[i]);
-      }
-    } else if (i == last_backward) {
-      sorted_ret.push_back(ret[i]);
-      // Verify that no operations before optimize ops depends on optimize ops.
-      std::unordered_set<ir::Node *> optimize_set(optimize_ops.begin(),
-                                                  optimize_ops.end());
-      for (ir::Node *n : sorted_ret) {
-        for (ir::Node *in : n->inputs) {
-          for (ir::Node *pre_n : in->inputs) {
-            PADDLE_ENFORCE(optimize_set.find(pre_n) == optimize_set.end(),
-                           "optimize operations cannot be depended by forward "
-                           "or backward node %s -> %s",
-                           pre_n->Name(), n->Name());
-          }
-        }
-      }
-      sorted_ret.insert(sorted_ret.end(), optimize_ops.begin(),
-                        optimize_ops.end());
-    } else {
-      sorted_ret.push_back(ret[i]);
-    }
-  }
-  return sorted_ret;
-}
-
 std::unique_ptr<ir::Graph> MultiDevSSAGraphBuilder::ApplyImpl(
     std::unique_ptr<ir::Graph> graph) const {
   Init();
   // Give the topology sort order and rebuild the graph structure.
-  std::vector<ir::Node *> sorted_ops = SortOpsAndDelayOptimizeOp(*graph);
+  std::vector<ir::Node *> sorted_ops = ir::TopologySortOperations(*graph);
   auto nodes = graph->ReleaseNodes();
   ir::Graph &result = *graph;
 
@@ -396,6 +344,8 @@ std::unique_ptr<ir::Graph> MultiDevSSAGraphBuilder::ApplyImpl(
                 switch (strategy_.reduce_) {
                   case BuildStrategy::ReduceStrategy::kReduce:
                     cur_device_id = GetAppropriateDeviceID({g_name});
+                    // TODO(paddle-dev): Should enforce g_name not in
+                    // kShardedVarDevice? so it's not assigned many times.
                     CreateReduceOp(&result, g_name, cur_device_id);
                     graph->Get<ShardedVarDevice>(kShardedVarDevice)
                         .emplace(g_name, cur_device_id);
@@ -588,10 +538,7 @@ int MultiDevSSAGraphBuilder::GetOpDeviceID(const ir::Graph &graph,
       node->Op()->GetAttr(OpProtoAndCheckerMaker::OpRoleVarAttrName()));
 
   PADDLE_ENFORCE_EQ(param_grad.size(), 2U);
-  int dev_id = GetVarDeviceID(graph, param_grad[1]);
-  PADDLE_ENFORCE_NE(dev_id, -1, "dev_id should not be -1.[%s, %s, %s]",
-                    node->Op()->Type(), param_grad[0], param_grad[1]);
-  return dev_id;
+  return GetVarDeviceID(graph, param_grad[1]);
 }
 
 int MultiDevSSAGraphBuilder::GetVarDeviceID(const ir::Graph &graph,
