@@ -46,21 +46,24 @@ class LookupTableKernel : public framework::OpKernel<T> {
     auto *table_var = context.InputVar("W");
 
     auto id_name = context.Inputs("Ids").front();
+    auto embedding_name = context.Inputs("W").front();
     auto out_name = context.Outputs("Out").front();
 
     // for remote prefetch
     auto epmap = context.Attr<std::vector<std::string>>("epmap");
-    auto height_sections = context.Attr<std::vector<int>>("height_sections");
+    auto remote_prefetch = context.Attr<bool>("remote_prefetch");
+    auto height_sections =
+        context.Attr<std::vector<int64_t>>("height_sections");
     auto table_names = context.Attr<std::vector<std::string>>("table_names");
 
-    if (!epmap.empty()) {
+    if (remote_prefetch && !epmap.empty()) {
 // if epmap is not empty, then the parameter will be fetched from remote
-// parameter
-// server
+// parameter server
+
 #ifdef PADDLE_WITH_DISTRIBUTE
-      operators::distributed::prefetch(id_name, out_name, table_names, epmap,
-                                       height_sections, context,
-                                       context.scope());
+      operators::distributed::prefetch(id_name, out_name, embedding_name, false,
+                                       table_names, epmap, height_sections,
+                                       context, context.scope());
 #else
       PADDLE_THROW(
           "paddle is not compiled with distribute support, can not do "
@@ -83,8 +86,18 @@ class LookupTableKernel : public framework::OpKernel<T> {
           if (padding_idx != kNoPadding && ids[i] == padding_idx) {
             memset(output + i * row_width, 0, row_width * sizeof(T));
           } else {
-            PADDLE_ENFORCE_LT(ids[i], row_number);
-            PADDLE_ENFORCE_GE(ids[i], 0, "ids %d", i);
+            PADDLE_ENFORCE_LT(
+                ids[i], row_number,
+                "Variable value (input) of OP(fluid.layers.embedding) "
+                "expected >= 0 and < %ld, but got %ld. Please check input "
+                "value.",
+                row_number, ids[i]);
+            PADDLE_ENFORCE_GE(
+                ids[i], 0,
+                "Variable value (input) of OP(fluid.layers.embedding) "
+                "expected >= 0 and < %ld, but got %ld. Please check input "
+                "value.",
+                row_number, ids[i]);
             memcpy(output + i * row_width, table + ids[i] * row_width,
                    row_width * sizeof(T));
           }
@@ -129,6 +142,7 @@ class LookupTableGradKernel : public framework::OpKernel<T> {
           "must be either LoDTensor or SelectedRows");
     }
 
+    int64_t padding_idx = context.Attr<int64_t>("padding_idx");
     bool is_sparse = context.Attr<bool>("is_sparse");
     // Since paddings are not trainable and fixed in forward, the gradient of
     // paddings makes no sense and we don't deal with it in backward.
@@ -178,8 +192,8 @@ class LookupTableGradKernel : public framework::OpKernel<T> {
 
       auto *ids_data = ids->data<int64_t>();
 
-      int N = table_dim[0];
-      int D = table_dim[1];
+      int64_t N = table_dim[0];
+      int64_t D = table_dim[1];
 
       auto *d_output_data = d_output->data<T>();
       auto *d_table_data = d_table->mutable_data<T>(context.GetPlace());
@@ -187,10 +201,23 @@ class LookupTableGradKernel : public framework::OpKernel<T> {
       memset(d_table_data, 0, d_table->numel() * sizeof(T));
 
       for (int64_t i = 0; i < ids->numel(); ++i) {
-        PADDLE_ENFORCE_LT(ids_data[i], N);
-        PADDLE_ENFORCE_GE(ids_data[i], 0);
-        for (int j = 0; j < D; ++j) {
-          d_table_data[ids_data[i] * D + j] += d_output_data[i * D + j];
+        if (padding_idx != kNoPadding && ids_data[i] == padding_idx) {
+          // the gradient of padding_idx should be 0, already done by memset, so
+          // do nothing.
+        } else {
+          PADDLE_ENFORCE_LT(
+              ids_data[i], N,
+              "Variable value (input) of OP(fluid.layers.embedding) "
+              "expected >= 0 and < %ld, but got %ld. Please check input value.",
+              N, ids_data[i]);
+          PADDLE_ENFORCE_GE(
+              ids_data[i], 0,
+              "Variable value (input) of OP(fluid.layers.embedding) "
+              "expected >= 0 and < %ld, but got %ld. Please check input value.",
+              N, ids_data[i]);
+          for (int j = 0; j < D; ++j) {
+            d_table_data[ids_data[i] * D + j] += d_output_data[i * D + j];
+          }
         }
       }
     }

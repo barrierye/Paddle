@@ -11,7 +11,9 @@ limitations under the License. */
 
 #include <array>
 #include <iostream>
+#include <list>
 #include <memory>
+#include <set>
 
 #include "gtest/gtest.h"
 #include "paddle/fluid/platform/enforce.h"
@@ -118,59 +120,58 @@ TEST(ENFORCE_GT, OK) { PADDLE_ENFORCE_GT(2, 1); }
 TEST(ENFORCE_GT, FAIL) {
   bool caught_exception = false;
   try {
-    PADDLE_ENFORCE_GT(1, 2UL);
+    PADDLE_ENFORCE_GT(1, 2);
   } catch (paddle::platform::EnforceNotMet error) {
     caught_exception = true;
-    EXPECT_TRUE(HasPrefix(
-        StringPiece(error.what()),
-        "Enforce failed. Expected 1 > 2UL, but received 1:1 <= 2UL:2."));
+    EXPECT_TRUE(
+        HasPrefix(StringPiece(error.what()),
+                  "Enforce failed. Expected 1 > 2, but received 1:1 <= 2:2."));
   }
   EXPECT_TRUE(caught_exception);
 }
 
 TEST(ENFORCE_GE, OK) {
-  PADDLE_ENFORCE_GE(2, 2UL);
-  PADDLE_ENFORCE_GE(3, 2UL);
+  PADDLE_ENFORCE_GE(2, 2);
   PADDLE_ENFORCE_GE(3, 2);
-  PADDLE_ENFORCE_GE(3.21, 2UL);
+  PADDLE_ENFORCE_GE(3.21, 2.0);
 }
 TEST(ENFORCE_GE, FAIL) {
   bool caught_exception = false;
   try {
-    PADDLE_ENFORCE_GE(1, 2UL);
+    PADDLE_ENFORCE_GE(1, 2);
   } catch (paddle::platform::EnforceNotMet error) {
     caught_exception = true;
-    EXPECT_TRUE(HasPrefix(
-        StringPiece(error.what()),
-        "Enforce failed. Expected 1 >= 2UL, but received 1:1 < 2UL:2."));
+    EXPECT_TRUE(
+        HasPrefix(StringPiece(error.what()),
+                  "Enforce failed. Expected 1 >= 2, but received 1:1 < 2:2."));
   }
   EXPECT_TRUE(caught_exception);
 }
 
 TEST(ENFORCE_LE, OK) {
   PADDLE_ENFORCE_LE(1, 1);
-  PADDLE_ENFORCE_LE(1, 1UL);
-  PADDLE_ENFORCE_LE(2, 3UL);
-  PADDLE_ENFORCE_LE(2UL, 3);
-  PADDLE_ENFORCE_LE(2UL, 3.2);
+  PADDLE_ENFORCE_LE(1UL, 1UL);
+  PADDLE_ENFORCE_LE(2, 3);
+  PADDLE_ENFORCE_LE(2UL, 3UL);
+  PADDLE_ENFORCE_LE(2.0, 3.2);
 }
 TEST(ENFORCE_LE, FAIL) {
   bool caught_exception = false;
   try {
-    PADDLE_ENFORCE_GT(1, 2UL);
+    PADDLE_ENFORCE_GT(1, 2);
   } catch (paddle::platform::EnforceNotMet error) {
     caught_exception = true;
-    EXPECT_TRUE(HasPrefix(
-        StringPiece(error.what()),
-        "Enforce failed. Expected 1 > 2UL, but received 1:1 <= 2UL:2."));
+    EXPECT_TRUE(
+        HasPrefix(StringPiece(error.what()),
+                  "Enforce failed. Expected 1 > 2, but received 1:1 <= 2:2."));
   }
   EXPECT_TRUE(caught_exception);
 }
 
 TEST(ENFORCE_LT, OK) {
   PADDLE_ENFORCE_LT(3, 10);
-  PADDLE_ENFORCE_LT(2, 3UL);
-  PADDLE_ENFORCE_LT(2UL, 3);
+  PADDLE_ENFORCE_LT(2UL, 3UL);
+  PADDLE_ENFORCE_LT(2, 3);
 }
 TEST(ENFORCE_LT, FAIL) {
   bool caught_exception = false;
@@ -235,7 +236,13 @@ TEST(ENFORCE_USER_DEFINED_CLASS, EQ) {
 
 TEST(ENFORCE_USER_DEFINED_CLASS, NE) {
   Dims a{{1, 2, 3, 4}}, b{{5, 6, 7, 8}};
-  ASSERT_THROW(PADDLE_ENFORCE_EQ(a, b), paddle::platform::EnforceNotMet);
+  bool caught_exception = false;
+  try {
+    PADDLE_ENFORCE_EQ(a, b);
+  } catch (paddle::platform::EnforceNotMet&) {
+    caught_exception = true;
+  }
+  EXPECT_TRUE(caught_exception);
 }
 
 TEST(EOF_EXCEPTION, THROW_EOF) {
@@ -247,4 +254,108 @@ TEST(EOF_EXCEPTION, THROW_EOF) {
     EXPECT_TRUE(HasPrefix(StringPiece(error.what()), "There is no next data."));
   }
   EXPECT_TRUE(caught_eof);
+}
+
+#ifdef PADDLE_WITH_CUDA
+template <typename T>
+bool CheckCudaStatusSuccess(T value, const std::string& msg = "success") {
+  PADDLE_ENFORCE_CUDA_SUCCESS(value, msg);
+  return true;
+}
+
+template <typename T>
+bool CheckCudaStatusFailure(
+    T value, const std::string& msg = "self-defined cuda status failed") {
+  try {
+    PADDLE_ENFORCE_CUDA_SUCCESS(value, msg);
+    return false;
+  } catch (paddle::platform::EnforceNotMet& error) {
+    std::string ex_msg = error.what();
+    return ex_msg.find(msg) != std::string::npos;
+  }
+}
+
+TEST(enforce, cuda_success) {
+  EXPECT_TRUE(CheckCudaStatusSuccess(cudaSuccess));
+  EXPECT_TRUE(CheckCudaStatusFailure(cudaErrorInvalidValue));
+  EXPECT_TRUE(CheckCudaStatusFailure(cudaErrorMemoryAllocation));
+
+  EXPECT_TRUE(CheckCudaStatusSuccess(CURAND_STATUS_SUCCESS));
+  EXPECT_TRUE(CheckCudaStatusFailure(CURAND_STATUS_VERSION_MISMATCH));
+  EXPECT_TRUE(CheckCudaStatusFailure(CURAND_STATUS_NOT_INITIALIZED));
+
+  EXPECT_TRUE(CheckCudaStatusSuccess(CUDNN_STATUS_SUCCESS));
+  EXPECT_TRUE(CheckCudaStatusFailure(CUDNN_STATUS_NOT_INITIALIZED));
+  EXPECT_TRUE(CheckCudaStatusFailure(CUDNN_STATUS_ALLOC_FAILED));
+
+  EXPECT_TRUE(CheckCudaStatusSuccess(CUBLAS_STATUS_SUCCESS));
+  EXPECT_TRUE(CheckCudaStatusFailure(CUBLAS_STATUS_NOT_INITIALIZED));
+  EXPECT_TRUE(CheckCudaStatusFailure(CUBLAS_STATUS_INVALID_VALUE));
+#if !defined(__APPLE__) && !defined(_WIN32)
+  EXPECT_TRUE(CheckCudaStatusSuccess(ncclSuccess));
+  EXPECT_TRUE(CheckCudaStatusFailure(ncclUnhandledCudaError));
+  EXPECT_TRUE(CheckCudaStatusFailure(ncclSystemError));
+#endif
+}
+#endif
+
+struct CannotToStringType {
+  explicit CannotToStringType(int num) : num_(num) {}
+
+  bool operator==(const CannotToStringType& other) const {
+    return num_ == other.num_;
+  }
+
+  bool operator!=(const CannotToStringType& other) const {
+    return num_ != other.num_;
+  }
+
+ private:
+  int num_;
+};
+
+TEST(enforce, cannot_to_string_type) {
+  static_assert(
+      !paddle::platform::details::CanToString<CannotToStringType>::kValue,
+      "CannotToStringType must not be converted to string");
+  static_assert(paddle::platform::details::CanToString<int>::kValue,
+                "int can be converted to string");
+  CannotToStringType obj1(3), obj2(4), obj3(3);
+
+  PADDLE_ENFORCE_NE(obj1, obj2, "Object 1 is not equal to Object 2");
+  PADDLE_ENFORCE_EQ(obj1, obj3, "Object 1 is equal to Object 3");
+
+  std::string msg = "Compare obj1 with obj2";
+  try {
+    PADDLE_ENFORCE_EQ(obj1, obj2, msg);
+  } catch (paddle::platform::EnforceNotMet& error) {
+    std::string ex_msg = error.what();
+    LOG(INFO) << ex_msg;
+    EXPECT_TRUE(ex_msg.find(msg) != std::string::npos);
+    EXPECT_TRUE(
+        ex_msg.find("Expected obj1 == obj2, but received obj1 != obj2") !=
+        std::string::npos);
+  }
+
+  msg = "Compare x with y";
+  try {
+    int x = 3, y = 2;
+    PADDLE_ENFORCE_EQ(x, y, msg);
+  } catch (paddle::platform::EnforceNotMet& error) {
+    std::string ex_msg = error.what();
+    LOG(INFO) << ex_msg;
+    EXPECT_TRUE(ex_msg.find(msg) != std::string::npos);
+    EXPECT_TRUE(ex_msg.find("Expected x == y, but received x:3 != y:2") !=
+                std::string::npos);
+  }
+
+  std::set<int> set;
+  PADDLE_ENFORCE_EQ(set.begin(), set.end());
+  set.insert(3);
+  PADDLE_ENFORCE_NE(set.begin(), set.end());
+
+  std::list<float> list;
+  PADDLE_ENFORCE_EQ(list.begin(), list.end());
+  list.push_back(4);
+  PADDLE_ENFORCE_NE(list.begin(), list.end());
 }

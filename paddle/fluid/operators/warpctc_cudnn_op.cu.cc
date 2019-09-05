@@ -67,9 +67,11 @@ class CudnnCTCKernel : public framework::OpKernel<T> {
     softmax_logits.mutable_data<T>(logits->dims(), ctx.GetPlace());
     softmax_logits.set_lod(logits_lod);
     int rank = logits->dims().size();
+    int axis_dim = logits->dims()[rank - 1];
     Tensor in_2d = framework::ReshapeToMatrix(*logits, rank - 1);
     Tensor out_2d = framework::ReshapeToMatrix(softmax_logits, rank - 1);
-    math::SoftmaxFunctor<DeviceContext, T, false>()(dev_ctx, &in_2d, &out_2d);
+    math::SoftmaxFunctor<DeviceContext, T, false>()(dev_ctx, axis_dim, &in_2d,
+                                                    &out_2d);
 
     // ctc needs sequences data stored in transposed padding format
     // logits and grad using padding data of layout 'TNC'
@@ -144,19 +146,17 @@ class CudnnCTCKernel : public framework::OpKernel<T> {
         CUDNN_CTC_LOSS_ALGO_DETERMINISTIC, cu_ctcloss_desc, &workspace_size));
 
     T* loss_data = loss->mutable_data<T>(loss_dims, ctx.GetPlace());
-    math::SetConstant<DeviceContext, T>()(
-        ctx.template device_context<DeviceContext>(), loss, static_cast<T>(0));
 
-    auto temp_allocation =
-        platform::DeviceTemporaryAllocator::Instance().Get(dev_ctx).Allocate(
-            workspace_size);
-    void* cudnn_workspace = temp_allocation->ptr();
-
-    CUDNN_ENFORCE(platform::dynload::cudnnCTCLoss(
-        handle, cu_logits_desc, warpctc_logits_data, warpctc_label_data,
-        warpctc_label_lengths.data(), warpctc_logits_lengths.data(), loss_data,
-        cu_grad_desc, warpctc_grad_data, CUDNN_CTC_LOSS_ALGO_DETERMINISTIC,
-        cu_ctcloss_desc, cudnn_workspace, workspace_size));
+    auto workspace_handle = dev_ctx.cudnn_workspace_handle();
+    auto cudnn_func = [&](void* cudnn_workspace) {
+      CUDNN_ENFORCE(platform::dynload::cudnnCTCLoss(
+          handle, cu_logits_desc, warpctc_logits_data, warpctc_label_data,
+          warpctc_label_lengths.data(), warpctc_logits_lengths.data(),
+          loss_data, cu_grad_desc, warpctc_grad_data,
+          CUDNN_CTC_LOSS_ALGO_DETERMINISTIC, cu_ctcloss_desc, cudnn_workspace,
+          workspace_size));
+    };
+    workspace_handle.RunFunc(cudnn_func, workspace_size);
   }
 };
 

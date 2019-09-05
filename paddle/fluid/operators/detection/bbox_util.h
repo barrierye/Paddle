@@ -15,10 +15,36 @@ limitations under the License. */
 #pragma once
 #include <algorithm>
 #include "paddle/fluid/framework/eigen.h"
+#include "paddle/fluid/framework/op_registry.h"
 #include "paddle/fluid/framework/tensor.h"
 
 namespace paddle {
 namespace operators {
+
+struct RangeInitFunctor {
+  int start;
+  int delta;
+  int* out;
+  HOSTDEVICE void operator()(size_t i) { out[i] = start + i * delta; }
+};
+
+template <typename T>
+inline HOSTDEVICE T RoIArea(const T* box, bool normalized) {
+  if (box[2] < box[0] || box[3] < box[1]) {
+    // If coordinate values are is invalid
+    // (e.g. xmax < xmin or ymax < ymin), return 0.
+    return static_cast<T>(0.);
+  } else {
+    const T w = box[2] - box[0];
+    const T h = box[3] - box[1];
+    if (normalized) {
+      return w * h;
+    } else {
+      // If coordinate values are not within range [0, 1].
+      return (w + 1) * (h + 1);
+    }
+  }
+}
 
 /*
  * transform that computes target bounding-box regression deltas
@@ -95,6 +121,30 @@ void BboxOverlaps(const framework::Tensor& r_boxes,
       overlaps_et(i, j) =
           (inter_area == 0.) ? 0 : inter_area /
                                        (r_box_area + c_box_area - inter_area);
+    }
+  }
+}
+
+template <class T>
+void ClipTiledBoxes(const platform::DeviceContext& ctx,
+                    const framework::Tensor& im_info,
+                    const framework::Tensor& input_boxes,
+                    framework::Tensor* out) {
+  T* out_data = out->mutable_data<T>(ctx.GetPlace());
+  const T* im_info_data = im_info.data<T>();
+  const T* input_boxes_data = input_boxes.data<T>();
+  T zero(0);
+  T im_w = round(im_info_data[1] / im_info_data[2]);
+  T im_h = round(im_info_data[0] / im_info_data[2]);
+  for (int64_t i = 0; i < input_boxes.numel(); ++i) {
+    if (i % 4 == 0) {
+      out_data[i] = std::max(std::min(input_boxes_data[i], im_w - 1), zero);
+    } else if (i % 4 == 1) {
+      out_data[i] = std::max(std::min(input_boxes_data[i], im_h - 1), zero);
+    } else if (i % 4 == 2) {
+      out_data[i] = std::max(std::min(input_boxes_data[i], im_w - 1), zero);
+    } else {
+      out_data[i] = std::max(std::min(input_boxes_data[i], im_h - 1), zero);
     }
   }
 }

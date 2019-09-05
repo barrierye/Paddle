@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License. */
 
 #include "paddle/fluid/operators/sequence_ops/sequence_pad_op.h"
+#include <memory>
+#include <string>
 
 namespace paddle {
 namespace operators {
@@ -79,7 +81,7 @@ class SequencePadOp : public framework::OperatorWithKernel {
 
     std::vector<int> out_dims_vec{out_dim_0, padded_length};
     std::vector<int> len_dims_vec{out_dim_0, 1};
-    auto time_step_dims_vec = framework::vectorize2int(time_step_dims);
+    auto time_step_dims_vec = framework::vectorize<int>(time_step_dims);
     out_dims_vec.insert(out_dims_vec.end(), time_step_dims_vec.begin(),
                         time_step_dims_vec.end());
     ctx->SetOutputDim("Out", framework::make_ddim(out_dims_vec));
@@ -194,18 +196,39 @@ class SequencePadGradOp : public framework::OperatorWithKernel {
  protected:
   framework::OpKernelType GetExpectedKernelType(
       const framework::ExecutionContext& ctx) const override {
-    auto data_type = framework::GetDataTypeOfVar(ctx.InputVar("X"));
+    auto data_type = framework::GetDataTypeOfVar(
+        ctx.InputVar(framework::GradVarName("Out")));
     return framework::OpKernelType(data_type, ctx.device_context());
   }
 };
+
+class SequencePadGradOpDescMaker : public framework::SingleGradOpDescMaker {
+ public:
+  using framework::SingleGradOpDescMaker::SingleGradOpDescMaker;
+
+ protected:
+  std::unique_ptr<framework::OpDesc> Apply() const override {
+    std::unique_ptr<framework::OpDesc> op(new framework::OpDesc());
+    op->SetType("sequence_pad_grad");
+    op->SetAttrMap(Attrs());
+    op->SetInput("X", Input("X"));
+    op->SetInput(framework::GradVarName("Out"), OutputGrad("Out"));
+    op->SetOutput(framework::GradVarName("X"), InputGrad("X"));
+    return op;
+  }
+};
+
+DECLARE_NO_NEED_BUFFER_VARS_INFERENCE(
+    SequencePadGradOpNoNeedBufferVarsInference, "X");
 
 }  // namespace operators
 }  // namespace paddle
 
 namespace ops = paddle::operators;
 REGISTER_OPERATOR(sequence_pad, ops::SequencePadOp, ops::SequencePadOpMaker,
-                  paddle::framework::DefaultGradOpDescMaker<true>);
-REGISTER_OPERATOR(sequence_pad_grad, ops::SequencePadGradOp);
+                  ops::SequencePadGradOpDescMaker);
+REGISTER_OPERATOR(sequence_pad_grad, ops::SequencePadGradOp,
+                  ops::SequencePadGradOpNoNeedBufferVarsInference);
 REGISTER_OP_CPU_KERNEL(
     sequence_pad,
     ops::SequencePadOpKernel<paddle::platform::CPUDeviceContext, float>,

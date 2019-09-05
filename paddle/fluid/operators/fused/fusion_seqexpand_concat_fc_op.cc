@@ -39,7 +39,7 @@ void FusionSeqExpandConcatFCOp::InferShape(
 
   auto ins_dims = ctx->GetInputsDim("X");
   auto w_dims = ctx->GetInputDim("FCWeight");  // (M0+M1+M2+..) x D
-  PADDLE_ENFORCE_EQ(w_dims.size(), 2UL, "Input(FCWeight)'s rank must be 2.");
+  PADDLE_ENFORCE_EQ(w_dims.size(), 2, "Input(FCWeight)'s rank must be 2.");
   const int D = w_dims[1];
   int sum = ins_dims[0][1];
   for (size_t i = 1; i < ins_dims.size(); ++i) {
@@ -197,8 +197,7 @@ class FusionSeqExpandConcatFCOpKernel : public framework::OpKernel<T> {
 
 namespace ops = paddle::operators;
 REGISTER_OPERATOR(fusion_seqexpand_concat_fc, ops::FusionSeqExpandConcatFCOp,
-                  ops::FusionSeqExpandConcatFCOpMaker,
-                  paddle::framework::DefaultGradOpDescMaker<true>);
+                  ops::FusionSeqExpandConcatFCOpMaker);
 
 REGISTER_OP_CPU_KERNEL(fusion_seqexpand_concat_fc,
                        ops::FusionSeqExpandConcatFCOpKernel<float>,

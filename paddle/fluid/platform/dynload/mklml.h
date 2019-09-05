@@ -70,6 +70,8 @@ extern void* mklml_dso_handle;
   __macro(cblas_ddot);              \
   __macro(cblas_sasum);             \
   __macro(cblas_dasum);             \
+  __macro(cblas_isamax);            \
+  __macro(cblas_idamax);            \
   __macro(cblas_sscal);             \
   __macro(cblas_dscal);             \
   __macro(vsAdd);                   \
@@ -84,9 +86,16 @@ extern void* mklml_dso_handle;
   __macro(vdPowx);                  \
   __macro(vsInv);                   \
   __macro(vdInv);                   \
+  __macro(vmsErf);                  \
+  __macro(vmdErf);                  \
   __macro(MKL_Set_Num_Threads)
 
 MKLML_ROUTINE_EACH(DECLARE_DYNAMIC_LOAD_MKLML_WRAP);
+
+#if !defined(_WIN32)
+DYNAMIC_LOAD_MKLML_WRAP(mkl_scsrmm);
+DYNAMIC_LOAD_MKLML_WRAP(mkl_dcsrmm);
+#endif
 
 #undef DYNAMIC_LOAD_MKLML_WRAP
 

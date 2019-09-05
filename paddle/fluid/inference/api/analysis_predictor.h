@@ -15,12 +15,14 @@
 #pragma once
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 #include "paddle/fluid/framework/naive_executor.h"
 #include "paddle/fluid/inference/analysis/analyzer.h"
 #include "paddle/fluid/inference/api/api_impl.h"
 #include "paddle/fluid/inference/api/details/reset_tensor_array.h"
+#include "paddle/fluid/inference/api/helper.h"
 #include "paddle/fluid/inference/api/paddle_inference_api.h"
 #include "paddle/fluid/string/printf.h"
 #ifdef PADDLE_WITH_TESTING
@@ -33,7 +35,6 @@ using inference::analysis::Argument;
 using inference::analysis::Analyzer;
 using framework::proto::ProgramDesc;
 using framework::NaiveExecutor;
-using contrib::AnalysisConfig;
 
 /** \brief This predictor is based on the original native predictor with IR and
  * Analysis support.
@@ -44,7 +45,9 @@ using contrib::AnalysisConfig;
  */
 class AnalysisPredictor : public PaddlePredictor {
  public:
-  explicit AnalysisPredictor(const AnalysisConfig &config) : config_(config) {}
+  explicit AnalysisPredictor(const AnalysisConfig &config) : config_(config) {
+    predictor_id_ = inference::GetUniqueId();
+  }
   ~AnalysisPredictor();
 
   bool Init(const std::shared_ptr<framework::Scope> &parent_scope,
@@ -53,6 +56,9 @@ class AnalysisPredictor : public PaddlePredictor {
   bool Run(const std::vector<PaddleTensor> &inputs,
            std::vector<PaddleTensor> *output_data,
            int batch_size = -1) override;
+
+  std::vector<std::string> GetInputNames();
+  std::vector<std::string> GetOutputNames();
 
   std::unique_ptr<ZeroCopyTensor> GetInputTensor(
       const std::string &name) override;
@@ -64,6 +70,7 @@ class AnalysisPredictor : public PaddlePredictor {
   void CreateFeedFetchVar(framework::Scope *scope);
   void PrepareFeedFetch();
 
+  void PrepareArgument();
   void OptimizeInferenceProgram();
 
   Argument &analysis_argument() { return argument_; }
@@ -73,7 +80,13 @@ class AnalysisPredictor : public PaddlePredictor {
   framework::Scope *scope() { return scope_.get(); }
   framework::ProgramDesc &program() { return *inference_program_; }
 
-  void SetMkldnnThreadID(int tid);
+  std::string GetSerializedProgram() const override;
+
+  bool MkldnnQuantize();
+
+  // save program to  model
+  // save parameters to params
+  void SaveOptimModel(const std::string &dir);
 
  protected:
   // For memory optimization.
@@ -96,6 +109,26 @@ class AnalysisPredictor : public PaddlePredictor {
   template <typename T>
   void GetFetchOne(const framework::LoDTensor &fetchs,
                    PaddleTensor *output_data);
+  // PreSet and PostReset for Mkldnn multi-thread and dynamic shape input.
+  // Used in AnalysisPredictor::Run(), do not support
+  // AnalysisPredictor::ZeroRun() now.
+  void MkldnnPreSet(const std::vector<PaddleTensor> &inputs);
+  void MkldnnPostReset();
+
+#if PADDLE_WITH_TENSORRT
+  // When we use Paddle-TRT INT8 engine, we need to generate calibration table
+  // data first,
+  // the calibration table contains the range for each op's input and output,
+  // this whole process can be divided into several steps:
+  //
+  // 1. Builds a 32-bit engine, runs it on the calibration set, and records a
+  // histogram for each
+  // tensor of the distribution of activation values.
+  // 2. Builds a calibration table from the histograms.
+  //
+  // After step 2, we need to store the calibration table on disk
+  bool SaveTrtCalibToDisk();
+#endif
 
 // Some more detailed tests, they are made the friends of the predictor, so that
 // the all the details can be tested.
@@ -106,7 +139,7 @@ class AnalysisPredictor : public PaddlePredictor {
 #endif
 
  private:
-  contrib::AnalysisConfig config_;
+  AnalysisConfig config_;
   Argument argument_;
   std::unique_ptr<NaiveExecutor> executor_;
   platform::Place place_;
@@ -115,7 +148,21 @@ class AnalysisPredictor : public PaddlePredictor {
   std::shared_ptr<framework::ProgramDesc> inference_program_;
   std::vector<framework::OpDesc *> feeds_;
   std::map<std::string, size_t> feed_names_;
-  std::vector<framework::OpDesc *> fetchs_;
+  // Sorted according to the idx.
+  std::map<size_t, std::string> idx2feeds_;
+  std::vector<framework::OpDesc *> fetches_;
+  std::map<size_t, std::string> idx2fetches_;
+
+#if PADDLE_WITH_MKLDNN
+  // Helper class to perform quantization
+  class MkldnnQuantizer;
+  MkldnnQuantizer *mkldnn_quantizer_{nullptr};
+
+#if PADDLE_WITH_TESTING
+  friend class MkldnnQuantizerTest;
+#endif
+#endif
+
   // Memory buffer for feed inputs. The temporary LoDTensor will cause serious
   // concurrency problems, wrong results and memory leak, so cache them.
   std::vector<framework::LoDTensor> feed_tensors_;
@@ -127,13 +174,12 @@ class AnalysisPredictor : public PaddlePredictor {
   const size_t max_shape_collect_count_{1000};
   int need_collect_var_shapes_{-1};  // -1 for default, 0 for false, 1 for true.
   std::vector<std::map<std::string, std::vector<int>>> batch_var_shapes_;
+  int predictor_id_;
 
  private:
   // Some status here that help to determine the status inside the predictor.
-  bool status_program_optimized_{false};
   bool status_is_cloned_{false};
   bool status_use_gpu_{false};
-  bool status_ir_optim_enabled_{false};
 };
 
 }  // namespace paddle

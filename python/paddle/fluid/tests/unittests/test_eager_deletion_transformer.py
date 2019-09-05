@@ -14,14 +14,11 @@
 
 import os
 import unittest
-os.environ['FLAGS_eager_delete_tensor_gb'] = "0.0"
+import paddle.fluid as fluid
+
+fluid.core._set_eager_deletion_mode(0.0, 1.0, True)
 
 from test_parallel_executor_transformer import TestTransformer
-
-
-class EagerDeletionTestTransformer(TestTransformer):
-    pass
-
 
 if __name__ == '__main__':
     unittest.main()

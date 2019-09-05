@@ -22,6 +22,7 @@
 #include "paddle/fluid/framework/scope.h"
 #include "paddle/fluid/framework/selected_rows.h"
 #include "paddle/fluid/framework/variable_helper.h"
+#include "paddle/fluid/operators/distributed/async_sparse_param_update_recorder.h"
 #include "paddle/fluid/operators/distributed/rpc_server.h"
 #include "paddle/fluid/string/piece.h"
 #include "paddle/fluid/string/printf.h"
@@ -54,13 +55,19 @@ bool RequestSendHandler::Handle(const std::string& varname,
     // Async
     if (!sync_mode_) {
       VLOG(3) << "async process var: " << varname;
-      try {
-        executor_->RunPreparedContext((*grad_to_prepared_ctx_)[varname].get(),
-                                      scope);
-      } catch (std::exception& e) {
-        LOG(ERROR) << "async: run sub program error " << e.what();
-        return false;
+      if (varname == BATCH_BARRIER_MESSAGE) {
+        PADDLE_THROW(
+            "async mode should not recv BATCH_BARRIER_MESSAGE or "
+            "COMPLETE_MESSAGE");
       }
+      if (AsyncSparseParamUpdateRecorder::GetInstance()->HasGrad(varname)) {
+        auto& grad_slr =
+            scope->FindVar(varname)->Get<framework::SelectedRows>();
+        AsyncSparseParamUpdateRecorder::GetInstance()->Update(varname,
+                                                              grad_slr.rows());
+      }
+      executor_->RunPreparedContext((*grad_to_prepared_ctx_)[varname].get(),
+                                    scope);
       return true;
     } else {  // sync
       rpc_server_->WaitCond(kRequestSend);
@@ -82,8 +89,9 @@ bool RequestGetHandler::Handle(const std::string& varname,
                                const int trainer_id,
                                const std::string& out_var_name,
                                const std::string& table_name) {
-  VLOG(4) << "RequestGetHandler:" << varname
-          << " out_var_name: " << out_var_name;
+  VLOG(3) << "RequestGetHandler:" << varname
+          << " out_var_name: " << out_var_name << " trainer_id: " << trainer_id
+          << " table_name: " << table_name;
 
   if (sync_mode_) {
     if (varname == FETCH_BARRIER_MESSAGE) {
@@ -96,7 +104,7 @@ bool RequestGetHandler::Handle(const std::string& varname,
   } else {
     if (varname != FETCH_BARRIER_MESSAGE && varname != COMPLETE_MESSAGE) {
       if (enable_dc_asgd_) {
-        // NOTE: the format is determined by distributed_transpiler.py
+        // NOTE: the format is determined by distribute_transpiler.py
         std::string param_bak_name =
             string::Sprintf("%s.trainer_%d_bak", varname, trainer_id);
         VLOG(3) << "getting " << param_bak_name << " trainer_id " << trainer_id;

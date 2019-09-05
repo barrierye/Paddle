@@ -51,16 +51,13 @@ std::ostream &operator<<(std::ostream &os, const NativeConfig &config) {
      << "fraction_of_gpu_memory: " << config.fraction_of_gpu_memory << "\n";
   os << GenSpaces(num_spaces)
      << "specify_input_name: " << config.specify_input_name << "\n";
-  os << GenSpaces(num_spaces)
-     << "cpu_num_threads: " << config.cpu_math_library_num_threads() << "\n";
   num_spaces--;
   os << GenSpaces(num_spaces) << "}\n";
   return os;
 }
 
-std::ostream &operator<<(std::ostream &os,
-                         const contrib::AnalysisConfig &config) {
-  os << GenSpaces(num_spaces) << "contrib::AnalysisConfig {\n";
+std::ostream &operator<<(std::ostream &os, const AnalysisConfig &config) {
+  os << GenSpaces(num_spaces) << "AnalysisConfig {\n";
   num_spaces++;
   os << config.ToNativeConfig();
   if (!config.model_from_memory()) {
@@ -73,13 +70,15 @@ std::ostream &operator<<(std::ostream &os,
   }
   os << GenSpaces(num_spaces) << "enable_ir_optim: " << config.ir_optim()
      << "\n";
-  os << GenSpaces(num_spaces) << "enable_ir_optim: " << config.ir_optim()
-     << "\n";
+  os << GenSpaces(num_spaces)
+     << "cpu_num_threads: " << config.cpu_math_library_num_threads() << "\n";
   os << GenSpaces(num_spaces)
      << "use_feed_fetch_ops: " << config.use_feed_fetch_ops_enabled() << "\n";
   os << GenSpaces(num_spaces)
      << "use_tensorrt: " << config.tensorrt_engine_enabled() << "\n";
   os << GenSpaces(num_spaces) << "use_mkldnn: " << config.mkldnn_enabled()
+     << "\n";
+  os << GenSpaces(num_spaces) << "use_ngraph: " << config.ngraph_enabled()
      << "\n";
   num_spaces--;
   os << GenSpaces(num_spaces) << "}\n";

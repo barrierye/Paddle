@@ -14,6 +14,7 @@
 | emailweixu | Wei Xu |
 | gangliao | Gang Liao |
 | gongweibao | Wei-Bao Gong |
+| guru4elephant | Daxiang Dong |
 | Guo Sheng | Sheng Guo |
 | Haichao-Zhang | Hai-Chao Zhang |
 | hedaoyuan | Dao-Yuan He |
@@ -27,6 +28,7 @@
 | lcy-seso | Ying Cao |
 | cjld | Dun Liang |
 | lipeng-unisound | Peng Li |
+| gavin1332 | Yi Liu |
 | liuyuan | Yuan Liu |
 | livc | Zhao Li |
 | llxxxll | Yong-Feng Liu |
@@ -44,6 +46,8 @@
 | qingqing01 | Qing-Qing Dang |
 | reyoung | Yang Yu |
 | Sand3r- | Michal Gallus |
+| sfraczek | Sylwester Fraczek |
+| sneaxiy | Jin-Le Zeng |
 | Superjom | Chun-Wei Yan |
 | tensor-tang | Jian Tang |
 | tianbingsz | Tian-Bing Xu |
@@ -54,6 +58,7 @@
 | wangyang59 | Yang Wang |
 | wangzhen-nlp | Zhen Wang |
 | wen-bo-yang | Wen-Bo Yang |
+| wojtuss | Wojciech Uss |
 | wwhu | Wei-Wei Hu |
 | xinghai-sun | Xing-Hai Sun |
 | Xreki | Yi-Qun Liu |
